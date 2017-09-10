@@ -1,20 +1,24 @@
-import {Injectable, EventEmitter, Inject, OpaqueToken} from "@angular/core";
+import {Injectable, EventEmitter, Inject, InjectionToken} from "@angular/core";
 import {Observable} from "rxjs/Observable";
 import {Observer} from "rxjs/Observer";
 import "rxjs/add/observable/of";
+import "rxjs/add/operator/concat";
 import "rxjs/add/operator/share";
 import "rxjs/add/operator/map";
 import "rxjs/add/operator/merge";
+import "rxjs/add/operator/switchMap";
 import "rxjs/add/operator/toArray";
 import "rxjs/add/operator/take";
 
 import {TranslateStore} from "./translate.store";
 import {TranslateLoader} from "./translate.loader";
+import {TranslateCompiler} from "./translate.compiler";
 import {MissingTranslationHandler, MissingTranslationHandlerParams} from "./missing-translation-handler";
 import {TranslateParser} from "./translate.parser";
-import {isDefined} from "./util";
+import {mergeDeep, isDefined} from "./util";
 
-export const USE_STORE = new OpaqueToken('USE_STORE');
+export const USE_STORE = new InjectionToken<string>('USE_STORE');
+export const USE_DEFAULT_LANG = new InjectionToken<string>('USE_DEFAULT_LANG');
 
 export interface TranslationChangeEvent {
     translations: any;
@@ -149,14 +153,18 @@ export class TranslateService {
      *
      * @param store an instance of the store (that is supposed to be unique)
      * @param currentLoader An instance of the loader currently used
+     * @param compiler An instance of the compiler currently used
      * @param parser An instance of the parser currently used
      * @param missingTranslationHandler A handler for missing translations.
      * @param isolate whether this service should use the store or not
+     * @param useDefaultLang whether we should use default language translation when current language translation is missing.
      */
     constructor(public store: TranslateStore,
                 public currentLoader: TranslateLoader,
+                public compiler: TranslateCompiler,
                 public parser: TranslateParser,
                 public missingTranslationHandler: MissingTranslationHandler,
+                @Inject(USE_DEFAULT_LANG) private useDefaultLang: boolean = true,
                 @Inject(USE_STORE) private isolate: boolean = false) {
     }
 
@@ -200,6 +208,11 @@ export class TranslateService {
      * @returns {Observable<*>}
      */
     public use(lang: string): Observable<any> {
+        // don't change the language if the language given is already selected
+        if(lang === this.currentLang) {
+            return Observable.of(this.translations[lang]);
+        }
+        
         let pending: Observable<any> = this.retrieveTranslations(lang);
 
         if(typeof pending !== "undefined") {
@@ -240,6 +253,7 @@ export class TranslateService {
 
     /**
      * Gets an object of translations for a given language with the current loader
+     * and passes it through the compiler
      * @param lang
      * @returns {Observable<*>}
      */
@@ -249,7 +263,7 @@ export class TranslateService {
 
         this.loadingTranslations.take(1)
             .subscribe((res: Object) => {
-                this.translations[lang] = res;
+                this.translations[lang] = this.compiler.compileTranslations(res, lang);
                 this.updateLangs();
                 this.pending = false;
             }, (err: any) => {
@@ -261,13 +275,15 @@ export class TranslateService {
 
     /**
      * Manually sets an object of translations for a given language
+     * after passing it through the compiler
      * @param lang
      * @param translations
      * @param shouldMerge
      */
     public setTranslation(lang: string, translations: Object, shouldMerge: boolean = false): void {
+        translations = this.compiler.compileTranslations(translations, lang);
         if(shouldMerge && this.translations[lang]) {
-            Object.assign(this.translations[lang], translations);
+            this.translations[lang] = mergeDeep(this.translations[lang], translations);
         } else {
             this.translations[lang] = translations;
         }
@@ -346,7 +362,7 @@ export class TranslateService {
             res = this.parser.interpolate(this.parser.getValue(translations, key), interpolateParams);
         }
 
-        if(typeof res === "undefined" && this.defaultLang && this.defaultLang !== this.currentLang) {
+        if(typeof res === "undefined" && this.defaultLang && this.defaultLang !== this.currentLang && this.useDefaultLang) {
             res = this.parser.interpolate(this.parser.getValue(this.translations[this.defaultLang], key), interpolateParams);
         }
 
@@ -401,6 +417,30 @@ export class TranslateService {
     }
 
     /**
+     * Returns a stream of translated values of a key (or an array of keys) which updates
+     * whenever the language changes.
+     * @param key
+     * @param interpolateParams
+     * @returns {any} A stream of the translated key, or an object of translated keys
+     */
+    public stream(key: string | Array<string>, interpolateParams?: Object): Observable<string | any> {
+        if(!isDefined(key) || !key.length) {
+            throw new Error(`Parameter "key" required`);
+        }
+
+        return this
+            .get(key, interpolateParams)
+            .concat(this.onLangChange.switchMap((event: LangChangeEvent) => {
+                const res = this.getParsedResult(event.translations, key, interpolateParams);
+                if(typeof res.subscribe === "function") {
+                    return res;
+                } else {
+                    return Observable.of(res);
+                }
+            }));
+    }
+
+    /**
      * Returns a translation instantly from the internal state of loaded translation.
      * All rules regarding the current language, the preferred language of even fallback languages will be used except any promise handling.
      * @param key
@@ -428,13 +468,13 @@ export class TranslateService {
     }
 
     /**
-     * Sets the translated value of a key
+     * Sets the translated value of a key, after compiling it
      * @param key
      * @param value
      * @param lang
      */
     public set(key: string, value: string, lang: string = this.currentLang): void {
-        this.translations[lang][key] = value;
+        this.translations[lang][key] = this.compiler.compile(value, lang);
         this.updateLangs();
         this.onTranslationChange.emit({lang: lang, translations: this.translations[lang]});
     }

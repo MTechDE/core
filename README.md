@@ -2,7 +2,7 @@
 
 The internationalization (i18n) library for Angular 2+.
 
-Simple example using ngx-translate: https://plnkr.co/edit/01UjWY3TKfP6pgwXKuEa?p=preview
+Simple example using ngx-translate: https://plnkr.co/edit/WccVZSBM0rUgq2sXSUbe?p=preview
 
 Get the complete changelog here: https://github.com/ngx-translate/core/releases
 
@@ -24,7 +24,7 @@ First you need to install the npm module:
 npm install @ngx-translate/core --save
 ```
 
-**If you use SystemJS** to load your files, you can check the [plunkr example](https://plnkr.co/edit/01UjWY3TKfP6pgwXKuEa?p=preview) for a working setup that uses the cdn [https://unpkg.com/](https://unpkg.com/).
+**If you use SystemJS** to load your files, you can check the [plunkr example](https://plnkr.co/edit/WccVZSBM0rUgq2sXSUbe?p=preview) for a working setup that uses the cdn [https://unpkg.com/](https://unpkg.com/).
 If you're importing directly from `node_modules`, you should edit your systemjs config file and add `'@ngx-translate/core': 'node_modules/@ngx-translate/core/bundles'` in the map and `'@ngx-translate/core' : { defaultExtension: 'js' }` in packages.
 
 
@@ -74,15 +74,16 @@ export class SharedModule { }
 
 When you lazy load a module, you should use the `forChild` static method to import the `TranslateModule`.
 
-Since lazy loaded modules use a different injector from the rest of your application, you can configure them separately with a different loader/parser/missing translations handler.
+Since lazy loaded modules use a different injector from the rest of your application, you can configure them separately with a different loader/compiler/parser/missing translations handler.
 You can also isolate the service by using `isolate: true`. In which case the service is a completely isolated instance (for translations, current lang, events, ...).
-Otherwise, by default, it will share its data with other instances of the service (but you can still use a different loader/parser/handler even if you don't isolate the service).
+Otherwise, by default, it will share its data with other instances of the service (but you can still use a different loader/compiler/parser/handler even if you don't isolate the service).
 
 ```ts
 @NgModule({
     imports: [
         TranslateModule.forChild({
             loader: {provide: TranslateLoader, useClass: CustomLoader},
+            compiler: {provide: TranslateCompiler, useClass: CustomCompiler},
             parser: {provide: TranslateParser, useClass: CustomParser},
             missingTranslationHandler: {provide: MissingTranslationHandler, useClass: CustomHandler},
             isolate: true
@@ -96,7 +97,15 @@ export class LazyLoadedModule { }
 
 By default, there is no loader available. You can add translations manually using `setTranslation` but it is better to use a loader.
 You can write your own loader, or import an existing one.
-For example you can use the [`TranslateHttpLoader`](https://github.com/ngx-translate/http-loader) that will load translations from files using Http.
+For example you can use the [`TranslateHttpLoader`](https://github.com/ngx-translate/http-loader) that will load translations from files using HttpClient.
+
+To use it, you need to install the http-loader package from @ngx-translate:
+
+```sh
+npm install @ngx-translate/http-loader --save
+```
+
+**NB: if you're still on Angular <4.3, please use Http from @angular/http with http-loader@0.1.0.**
 
 Once you've decided which loader to use, you have to setup the `TranslateModule` to use it.
 
@@ -105,25 +114,25 @@ Here is how you would use the `TranslateHttpLoader` to load translations from "/
 ```ts
 import {NgModule} from '@angular/core';
 import {BrowserModule} from '@angular/platform-browser';
-import {HttpModule, Http} from '@angular/http';
+import {HttpClientModule, HttpClient} from '@angular/common/http';
 import {TranslateModule, TranslateLoader} from '@ngx-translate/core';
 import {TranslateHttpLoader} from '@ngx-translate/http-loader';
-import {AppComponent} from "./app";
+import {AppComponent} from './app';
 
 // AoT requires an exported function for factories
-export function HttpLoaderFactory(http: Http) {
+export function HttpLoaderFactory(http: HttpClient) {
     return new TranslateHttpLoader(http);
 }
 
 @NgModule({
     imports: [
         BrowserModule,
-        HttpModule,
+        HttpClientModule,
         TranslateModule.forRoot({
             loader: {
                 provide: TranslateLoader,
                 useFactory: HttpLoaderFactory,
-                deps: [Http]
+                deps: [HttpClient]
             }
         })
     ],
@@ -134,22 +143,22 @@ export class AppModule { }
 
 ##### AoT
 
-If you want to configure a custom `TranslateLoader` while using [AoT compilation](https://angular.io/docs/ts/latest/cookbook/aot-compiler.html) or [Ionic 2](http://ionic.io/), you must use an exported function instead of an inline function.
+If you want to configure a custom `TranslateLoader` while using [AoT compilation](https://angular.io/docs/ts/latest/cookbook/aot-compiler.html) or [Ionic](http://ionic.io/), you must use an exported function instead of an inline function.
 
 ```ts
-export function createTranslateLoader(http: Http) {
+export function createTranslateLoader(http: HttpClient) {
     return new TranslateHttpLoader(http, './assets/i18n/', '.json');
 }
 
 @NgModule({
     imports: [
         BrowserModule,
-        HttpModule,
+        HttpClientModule,
         TranslateModule.forRoot({
             loader: {
                 provide: TranslateLoader,
                 useFactory: (createTranslateLoader),
-                deps: [Http]
+                deps: [HttpClient]
             }
         })
     ],
@@ -295,7 +304,7 @@ To render them, simply use the `innerHTML` attribute with the pipe on any elemen
 	  // do something
 	});
     ```
-    
+
 #### Methods:
 
 - `setDefaultLang(lang: string)`: Sets the default language to use as a fallback
@@ -306,6 +315,7 @@ To render them, simply use the `innerHTML` attribute with the pipe on any elemen
 - `addLangs(langs: Array<string>)`: Add new langs to the list
 - `getLangs()`: Returns an array of currently available langs
 - `get(key: string|Array<string>, interpolateParams?: Object): Observable<string|Object>`: Gets the translated value of a key (or an array of keys) or the key if the value was not found
+- `stream(key: string|Array<string>, interpolateParams?: Object): Observable<string|Object>`: Returns a stream of translated values of a key (or an array of keys) or the key if the value was not found. Without any `onLangChange` events this returns the same value as `get` but it will also emit new values whenever the used language changes.
 - `instant(key: string|Array<string>, interpolateParams?: Object): string|Object`: Gets the instant translated value of a key (or an array of keys). /!\ This method is **synchronous** and the default file loader is asynchronous. You are responsible for knowing when your translations have been loaded and it is safe to use this method. If you are not sure then you should use the `get` method instead.
 - `set(key: string, value: string, lang?: string)`: Sets the translated value of a key
 - `reloadLang(lang: string): Observable<string|Object>`: Calls resetLang and retrieves the translations object for the current loader
@@ -341,10 +351,23 @@ Once you've defined your loader, you can provide it in your configuration by add
 })
 export class AppModule { }
 ```
+[Another custom loader example with translations stored in Firebase](FIREBASE_EXAMPLE.md)
+
+#### How to use a compiler to preprocess translation values
+
+By default, translation values are added "as-is". You can configure a `compiler` that implements `TranslateCompiler` to pre-process translation values when they are added (either manually or by a loader). A compiler has the following methods:
+
+- `compile(value: string, lang: string): string | Function`: Compiles a string to a function or another string.
+- `compileTranslations(translations: any, lang: string): any`:  Compiles a (possibly nested) object of translation values to a structurally identical object of compiled translation values. 
+
+Using a compiler opens the door for powerful pre-processing of translation values. As long as the compiler outputs a compatible interpolation string or an interpolation function, arbitrary input syntax can be supported.
+
 
 #### How to handle missing translations
 
 You can setup a provider for the `MissingTranslationHandler` in the bootstrap of your application (recommended), or in the `providers` property of a component. It will be called when the requested translation is not available. The only required method is `handle` where you can do whatever you want. If this method returns a value or an observable (that should return a string), then this will be used. Just don't forget that it will be called synchronously from the `instant` method.
+
+You can use `useDefaultLang` to decide whether default language string should be used when there is a missing translation in current language. Default value is true. If you set it to false, `MissingTranslationHandler` will be used instead of the default language string.
 
 ##### Example:
 
@@ -367,11 +390,12 @@ Setup the Missing Translation Handler in your module import by adding it to the 
     imports: [
         BrowserModule,
         TranslateModule.forRoot({
-            missingTranslationHandler: {provide: MissingTranslationHandler, useClass: MyMissingTranslationHandler}
+            missingTranslationHandler: {provide: MissingTranslationHandler, useClass: MyMissingTranslationHandler},
+            useDefaultLang: false
         })
     ],
     providers: [
-        
+
     ],
     bootstrap: [AppComponent]
 })
@@ -383,9 +407,10 @@ export class AppModule { }
 If you need it for some reason, you can use the `TranslateParser` service.
 
 #### Methods:
-- `interpolate(expr: string, params?: any): string`: Interpolates a string to replace parameters.
+- `interpolate(expr: string | Function, params?: any): string`: Interpolates a string to replace parameters or calls the interpolation function with the parameters.
 
     `This is a {{ key }}` ==> `This is a value` with `params = { key: "value" }`
+    `(params) => \`This is a ${params.key}\` ==> `This is a value` with `params = { key: "value" }`
 - `getValue(target: any, key: string): any`:  Gets a value from an object by composed key
      `parser.getValue({ key1: { keyA: 'valueI' }}, 'key1.keyA') ==> 'valueI'`
 
@@ -402,8 +427,8 @@ If you're using an old version of Angular and ngx-translate requires a newer ver
 
 ## Plugins
 - [Localize Router](https://github.com/Greentube/localize-router) by @meeroslav: An implementation of routes localization for Angular. If you need localized urls (for example /fr/page and /en/page).
-- [.po files Loader](https://www.npmjs.com/package/@biesbjerg/ng2-translate-po-loader) by @biesbjerg: Use .po translation files with ngx-translate
-- [ng2-translate-extract](https://www.npmjs.com/package/@biesbjerg/ng2-translate-extract) by @biesbjerg: Extract translatable strings from your projects
+- [.po files Loader](https://github.com/biesbjerg/ngx-translate-po-http-loader) by @biesbjerg: Use .po translation files with ngx-translate
+- [ngx-translate-extract](https://github.com/biesbjerg/ngx-translate-extract) by @biesbjerg: Extract translatable strings from your projects
 
 ## Additional Framework Support
 
